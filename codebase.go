@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"text/template"
 
 	"github.com/dvln/mapstructure"
 	"github.com/dvln/out"
@@ -31,12 +32,13 @@ import (
 	globs "github.com/dvln/viper"
 )
 
-// Defn is the code base defintion: what pkgs are available to this codebase
-// and what, if any, configuration/description/etc information do we have
-// related to this code base.
+// Defn is the code base defintion file: what known pkgs are available to
+// this codebase at startup time and what, if any, detailed config/description
+// and other info do we have on this codebase and constituent packages.
 type Defn struct {
 	Name     string                       `json:"name"`
 	Desc     string                       `json:"desc"`
+    Pkg      pkg.Revision
 	Contacts []string                     `json:"contacts.omitempty"`
 	Attrs    map[string]string            `json:"attrs,omitempty"`
 	Vars     map[string]string            `json:"vars,omitempty"`
@@ -51,31 +53,31 @@ type Defn struct {
 type Locality int
 
 const (
-	// LocalPath indicates a pkg (repo) is available via locally accessible path
-	LocalPath Locality = 1 << iota
-	// Remote indicates no local path found, but available via remote/network
-	Remote
+	// LocalDir for pkg repo available via local host accessible dir
+	LocalDir Locality = 1 << iota
+	// RemoteURL indicates we're identifying the repo via a network URL
+	RemoteURL
 	// NonExistent indicates we couldn't find the repo, sorry
 	NonExistent
 	// Anywhere "combines" local and remote and just indicates the repo exists
-	Anywhere = LocalPath | Remote
+	Anywhere = LocalDir | RemoteURL
 )
 
-/* FIXME: erik: mucking around with ideas here
-type CodeBase interface {
-    Exists(name string, locality Locality) (string, locality, error)
-    Get(name string, dest string) error
-    Read(r io.Reader) error
-    Write(w io.Writer) error
-    //PkgExists(pkgSel string) (*Pkg, error)
-    //Pkg(pkgSel string) (*pkg.Pkg, error)
-    //AddPkg(p *pkg.Pkg) error
-    //RmPkg(p *pkg.Pkg) error
-    //Pkgs(pkgSel ...string) []*pkg.Pkg
-    //Item(item CodebaseItem) error
-    //SetItem(item CodebaseItem) error
+// Codebase is an interface for working with 'dvln' codebases, not that it
+// is of much use today it may help with testing and other fun over time.
+// maybe ReadWriteGetter would be a better name (?)... or "Manipulater"
+// - currently not used, playing with ideas
+type Codebase interface {
+	Read(r io.Reader) error
+	Write(w io.Writer) error
+	//PkgExists(pkgSel string) (*Pkg, error)
+	//Pkg(pkgSel string) (*pkg.Pkg, error)
+	//AddPkg(p *pkg.Pkg) error
+	//RmPkg(p *pkg.Pkg) error
+	//Pkgs(pkgSel ...string) []*pkg.Pkg
+	//Item(item CodebaseItem) error
+	//SetItem(item CodebaseItem) error
 }
-*/
 
 /* FIXME: erik: consider a way to get at fields generically, perhaps:
 type CodebaseItem interface {
@@ -86,6 +88,147 @@ func (c *Defn) Item(i CodebaseItem) error {
     return c.UnmarshalCodebase(i)
 }
 */
+
+// Exists checks for codebase existence by using the basic pkg rev Exists()
+// routine to see if the specified codebase (at any specified rev, or from
+// the default VCS rev) can be found.  If so it'll return the fullest URI
+// it can to that codebase pkg repo, otherwise an error is returned.
+// Config file and env var settings can help to find the codebase, ie:
+// * DVLN_CODEBASE_PATH in env or codebase_path in cfg file
+// -  > space separated list of paths to prepend to the codebase name
+// -  > eg: "github.com/dvln git+ssh://host.com/path/to/clones /some/local/dir"
+// -     - note: 'hub' and 'hub:<uri>' reserved for future user/central dvln hub
+// -  > all values are *always* forward slash regardless of platform
+// -  > 'dvln' as the codebase would result in looking, in order, here:
+// -     > "github.com/dvln/dvln[.git]"
+// -     > "git+ssh://host.com/clone/path/dvln[.git]"
+// -     > "/some/local/dir/dvln[.git]"
+// -     > "dvln"
+// -  > final fallback will be on the individual dvln itself
+// Based on the above existence checks it'll return:
+// - string: URI: full path (on filesystem) or URL (if remote), "" if not found
+// - locality: where it exists (LocalDir, RemoteURL, NonExistent)
+// - error: any error that is detected in scanning for the workspace
+func (cb *Defn) Exists(codebaseVerSel string) (string, Locality, error) {
+	//eriknow, make some choices around codebase existence checks...
+	//         should be a challenge, that's for sure
+	var err error
+	exists := false
+	if codebaseVerSel != "" {
+		exists, err = file.Exists(codebaseVerSel)
+	}
+	wkspcRootDir := ""
+	if !exists {
+		wkspcRootDir = globs.GetString("wkspcRootDir")
+	}
+	if wkspcRootDir == "" {
+		wkspcRootDir = globs.GetString("dvlnCfgDir")
+	}
+	if codebaseVerSel == "" || !exists || err != nil {
+		if err == nil {
+			out.Debugln("No codebase file to read, skipping (considered normal)")
+		} else {
+			out.Debugf("No codebase file to read, skipping (abnormal, unexpected err: %s)\n", err)
+		}
+		return "", NonExistent, err
+	}
+	return codebaseVerSel, LocalDir, nil
+}
+
+func (cb *Defn) applyVarsToField(desc, fieldName, fieldValue string) (string, error) {
+	t := template.New(fieldName)
+	t, err := t.Parse(fieldValue)
+	if err != nil {
+		return "", out.WrapErrf(err, 3004, "Parsing problem applying templates to:\n%v\n  URI Template: %v", desc, fieldValue)
+	}
+	buf := new(bytes.Buffer)
+	err = t.Execute(buf, cb.Vars)
+	if err != nil {
+		return "", out.WrapErrf(err, 3005, "Template execute problem with codebase repo definition\n%v\n  URI Template: %v", desc, fieldValue)
+	}
+	result := fmt.Sprintf("%s", buf)
+	return result, nil
+}
+
+// expandVarUse basically takes any variables (Vars) defined in the
+// codebase definition file in a codebase wide section like this:
+//   ...
+//   "vars" : {
+//     "dvln": "http://github.com/dvln",
+//     "joe": "http://github.com/joe",
+//     "spf13": "http://github.com/spf13"
+//   },
+//   ...
+// So that anywhere we see "{{<.varname>/etc}}" so that something like
+// these (defined for a single package in the codebase):
+//       "repo" : { "rw": "{{.dvln}}/viper" },
+//       "remotes" : {
+//         "vendor": { "r": "{{.spf13}}/viper" },
+//         "joe": { "read": "{{.joe}}/viper" }
+//       },
+// Would turn into:
+//       "repo" : { "rw": "http://github.com/dvln/viper" },
+//       "remotes" : {
+//         "vendor": { "r": "http://github.com/spf13/viper" },
+//         "joe": { "read": "http://github.com/joe/viper" }
+//       },
+// The other codebase level access would turn from this:
+//   "access" : {
+//     "m,^{{.dvln}}/*, && Vendor!=True": {
+//       "read" : "open",
+//       "write": "http://dvln.org/api/v1/access?codebase={{.TopCodebase}}&pkg={{.Pkg}}&branch={{.Branch}}&devline={{.Devline}}&user={{.UserID}}&type=write"
+//     }
+//   },
+// Into this (only focuses on the condiitonal part):
+//   "access" : {
+//     "m,^http://github.com/dvln/*, && Vendor!=True": {
+//       "read" : "open",
+//       "write": "http://dvln.org/api/v1/access?codebase={{.TopCodebase}}&pkg={{.Pkg}}&branch={{.Branch}}&devline={{.Devline}}&user={{.UserID}}&type=write"
+//     }
+//   },
+// Right now it's kind of cheesy and only adjusts "access" (codebase-wide),
+// remotes" and "repo" related codebase fields (currently only place that
+// var's can be used):
+func (cb *Defn) expandVarUse() error {
+	// Deal with the codebase level access conditional here, expanding any
+	// vars used in templates there
+	for conditional, accessMap := range cb.Access {
+		desc := fmt.Sprintf("  Access Conditional for Codebase: %s\n", cb.Name)
+		result, err := cb.applyVarsToField(desc, "codebaseAccess", conditional)
+		if err != nil {
+			return err
+		}
+		if result != conditional {
+			cb.Access[result] = accessMap
+			delete(cb.Access, conditional)
+		}
+	}
+
+	// Deal with package settings that can use vars in templates here:
+	for _, pkg := range cb.Pkgs {
+		// first deal with any repo settings using vars
+		for access, repoURI := range pkg.Repo {
+			desc := fmt.Sprintf("  Pkg: %s\n  Tgt: %s", pkg.Name, access)
+			result, err := cb.applyVarsToField(desc, "repoURI", repoURI)
+			if err != nil {
+				return err
+			}
+			pkg.Repo[access] = result
+		}
+		// then deal with any remotes definitions set up using vars
+		for remName, remURLMap := range pkg.Remotes {
+			for access, repoURI := range remURLMap {
+				desc := fmt.Sprintf("  Pkg: %s\n  Remote: %s\nTgt: %s", pkg.Name, remName, access)
+				result, err := cb.applyVarsToField(desc, "remoteURI", repoURI)
+				if err != nil {
+					return err
+				}
+				remURLMap[access] = result
+			}
+		}
+	}
+	return nil
+}
 
 // Read will, given an io.Reader, attempt to scan in the codebase contents
 // and "fill out" the given Defn structure for you.  What could
@@ -111,46 +254,35 @@ func (cb *Defn) Read(r io.Reader) error {
 	if err != nil {
 		return out.WrapErr(err, "Failed to decode codebase file contents", 3003)
 	}
+	// codebase definitions can be reduced in size if the person defining that
+	// file uses variables to identify common repo references and such, lets
+	// examine those vars and, if any, make sure we "expand" them so the codebase
+	// definition is complete.  Write() will "smart" subtitute the vars back.
+	if err = cb.expandVarUse(); err != nil {
+		return err
+	}
 	return nil
 }
 
-// Exists scans to see if the given codebase exists, and one can
-// narrow that using Locality (LocalPath, Remote or Anywhere) and
-// if it exists you will be told where (path or URL) and if that
-// is a local host accessible path or remote (via a returned locality)
-// and if there was some error checking existence (if no error and
-// doesn't exist then the where it exists will be "" and locality
-// will be the NonExistent constant)
-func (cb *Defn) Exists(codebaseSel string, locality Locality) (string, Locality, error) {
-	var err error
-	exists := false
-	if codebaseSel != "" {
-		exists, err = file.Exists(codebaseSel)
-	}
-	ws_root_dir := ""
-	if !exists {
-		ws_root_dir = globs.GetString("wsRootDir")
-	}
-	if ws_root_dir == "" {
-		ws_root_dir = globs.GetString("dvlnCfgDir")
-	}
-	if codebaseSel == "" || !exists || err != nil {
-		if err == nil {
-			out.Debugln("No codebase file to read, skipping (considered normal)")
-		} else {
-			out.Debugf("No codebase file to read, skipping (abnormal, unexpected err: %s)\n", err)
-		}
-		return "", NonExistent, err
-	}
-	return codebaseSel, LocalPath, nil
+// Write will, given an io.Writer, attempt to write the codebase out to
+// it's local file representation, note that it will take any settings
+// matching a "Var" and "re-compact" it so the "{{.<var>}}" is used for
+// any exact matches in fields that support var expansion.
+func (cb *Defn) Write(r io.Writer) error {
+	//FIXME: erik: make this thing work
+	return nil
 }
 
-// FindAndRead does just that, it finds the codebase related to the given
-// name (can be a name, URL or any valid CodeBase selector) and it will
-// grab it if it is not local already (assuming it exists) and it will
-// read it into the codebase data structure.
-func FindAndRead(codebaseSel string) (*Defn, error) {
+// New returns a pointer to a codebase definition, empty at this point, see Get
+// and/or Read
+func New() *Defn {
 	cb := &Defn{}
+	return cb
+}
+
+// Get basically tries to find, get and read a codebase if it can, it
+// returns a codebase definition and any error's that may have occurred
+func (cb *Defn) Get(codebaseVerSel string) error {
 	//eriknow: normally we would do any smart discovery of the code base
 	//         definition file here via 'findCodebase()' or something which
 	//         would be able to get it via local file (support RCS versioned),
@@ -170,13 +302,14 @@ func FindAndRead(codebaseSel string) (*Defn, error) {
 	// normally Exists() would do this part and try and get us a "real" name for the
 	// codebase (full URL/etc... but the name should be simple in the file even if
 	// the "full" name is a URL and such)
-	fileName := fmt.Sprintf("/Users/brady/.dvlncfg/%s.codebase", codebaseSel)
-	cbFile, locality, err := cb.Exists(fileName, LocalPath)
+	fileName := fmt.Sprintf("/Users/brady/.dvlncfg/%s.codebase", codebaseVerSel)
+	cbFile, locality, err := cb.Exists(fileName)
 	if locality == NonExistent {
-		cb = &Defn{Name: "generated", Desc: "Dynamically generated development line"}
-		return cb, err // note, err may be nil as it's ok for codebase not to exist
+		cb.Name = "generated"
+		cb.Desc = "Dynamically generated development line"
+		return err // note, err may be nil as it's ok for codebase not to exist
 	}
-	//FIXME: erik: normally we would check and see if locality was 'Remote' as well
+	//FIXME: erik: normally we would check and see if locality was 'RemoteURL' as well
 	//       and, if so, use the Get() routine to bring it down to our workspace
 	//       if we have one and to a tmp location if not (wsroot should be set
 	//       in viper if we have a workspace, note that if it's nested it may
@@ -184,9 +317,8 @@ func FindAndRead(codebaseSel string) (*Defn, error) {
 	fileContents, err := ioutil.ReadFile(cbFile)
 	if err != nil {
 		msg := fmt.Sprintf("Codebase file \"%s\" read failed\n", cbFile)
-		return cb, out.WrapErr(err, msg, 3000)
+		return out.WrapErr(err, msg, 3000)
 	}
-	out.Tracef("---- Codebase file '%s' contents ----\n%s---- END ----\n", cbFile, fileContents)
 	err = cb.Read(bytes.NewReader(fileContents))
-	return cb, err
+	return err
 }
