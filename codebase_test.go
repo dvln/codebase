@@ -31,7 +31,9 @@ import (
 
 var codebaseExample = []byte(` { "name" : "dvln",
    "desc" : "Multi-package and workspace management tool",
-   "contacts" : [ "Erik Brady <brady@dvln.org>" ],
+   "contacts" : {
+   	 "authors" : [ "Erik Brady <brady@dvln.org>" ]
+   },
    "attrs" : {
      "linkalias" : "True",
      "jobs" : "4",
@@ -39,7 +41,7 @@ var codebaseExample = []byte(` { "name" : "dvln",
      "key1" : "val2"
    },
    "pathing": {
-   	 "ws_pfx_dir" : "{{if .GoPkg}}src{{end}}"
+   	 "wkspc_pfx_dir" : "{{if .GoPkg}}src{{end}}"
    },
    "vars" : {
      "dvln": "http://github.com/dvln",
@@ -58,12 +60,17 @@ var codebaseExample = []byte(` { "name" : "dvln",
        "name" : "dvln/lib/3rd/viper",
        "desc" : "dvln project copy of spf13/viper package",
        "ws" : "src/dvln/lib/3rd/viper",
-       "vcs" : "git",
-       "repo" : { "rw": "{{.dvln}}/viper" },
-       "aliases" : {
-         "dvln/lib/olddir/viper": "src/dvln/lib/olddir/viper",
-         "dvln/reallyolddir/viper": "src/dvln/reallyolddir/viper"
-       },
+       "aliases" : { "dvln/lib/olddir/viper": "src/dvln/lib/olddir/viper",
+                     "dvln/reallyolddir/viper": "src/dvln/reallyolddir/viper" },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+       	   "repo" : { "rw": "{{.dvln}}/viper" },
+           "remotes" : {
+              "vendor,spf13": { "r": "{{.spf13}}/viper" },
+              "joe": { "read": "{{.joe}}/viper" }
+           }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Vendor": "True",
@@ -71,29 +78,25 @@ var codebaseExample = []byte(` { "name" : "dvln",
          "Readers" : "anyone",
          "Committers" : "team1@co.com"
        },
-       "remotes" : {
-         "vendor": { "r": "{{.spf13}}/viper" },
-         "joe": { "read": "{{.joe}}/viper" }
-       },
        "status" : "active"
      },
      { "id" : "23",
        "name" : "dvln/lib/out",
        "desc" : "dvln project copy of spf13/viper package",
-       "vcs" : "git",
+       "license" : "Apache-2.0",
        "ws" : "src/dvln/lib/out",
-       "repo" : { "rw": "{{.dvln}}/out" },
-       "aliases" : {
-         "dvln/lib/oldoutname": "src/dvln/lib/oldoutname"
-       },
+       "aliases" : { "dvln/lib/oldoutname": "src/dvln/lib/oldoutname" },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+           "repo" : { "rw": "{{.dvln}}/out" },
+           "remotes" : { "dhowlett": { "r": "{{.dhowlett}}/out" } }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Owners": "dvln@dvln.org",
          "Readers" : "anyone",
          "Committers" : "team_dvln@dvln.org"
-       },
-       "remotes" : {
-         "dhowlett" : { "rw": "{{.dhowlett}}/out" }
        },
        "access" : {
          "read" : "open",
@@ -104,20 +107,19 @@ var codebaseExample = []byte(` { "name" : "dvln",
      { "id" : "24",
        "name" : "dvln/web/hugo",
        "desc" : "a fast static website server",
-       "vcs" : "git",
        "class" : "codebase",
        "ws" : "src/dvln/web/hugo",
-       "repo" : { "rw": "{{.dvln}}/hugo" },
-       "aliases" : {
-         "github.com/spf13/hugo": "src/github.com/spf13/hugo"
-       },
+       "aliases" : { "github.com/spf13/hugo": "src/github.com/spf13/hugo" },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+           "repo" : { "rw": "{{.dvln}}/hugo" },
+           "remotes" : { "vendor,spf13": { "r": "{{.spf13}}/hugo" } }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Owners": "spf13@spf13.com",
          "Readers" : "anyone"
-       },
-       "remotes" : {
-         "vendor,spf13": { "r": "{{.spf13}}/hugo" }
        },
        "status" : "active"
      }
@@ -127,7 +129,9 @@ var codebaseExample = []byte(` { "name" : "dvln",
 
 var codebaseExpanded = []byte(` { "name" : "dvln",
    "desc" : "Multi-package and workspace management tool",
-   "contacts" : [ "Erik Brady <brady@dvln.org>" ],
+   "contacts" : {
+   	 "authors" : [ "Erik Brady <brady@dvln.org>" ]
+   },
    "attrs" : {
      "linkalias" : "True",
      "jobs" : "4",
@@ -135,7 +139,7 @@ var codebaseExpanded = []byte(` { "name" : "dvln",
      "key1" : "val2"
    },
    "pathing": {
-   	 "ws_pfx_dir" : "{{if .GoPkg}}src{{end}}"
+   	 "wkspc_pfx_dir" : "{{if .GoPkg}}src{{end}}"
    },
    "vars" : {
      "dvln": "http://github.com/dvln",
@@ -154,12 +158,19 @@ var codebaseExpanded = []byte(` { "name" : "dvln",
        "name" : "dvln/lib/3rd/viper",
        "desc" : "dvln project copy of spf13/viper package",
        "ws" : "src/dvln/lib/3rd/viper",
-       "vcs" : "git",
-       "repo" : { "rw": "http://github.com/dvln/viper" },
        "aliases" : {
          "dvln/lib/olddir/viper": "src/dvln/lib/olddir/viper",
          "dvln/reallyolddir/viper": "src/dvln/reallyolddir/viper"
        },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+       	   "repo" : { "rw": "http://github.com/dvln/viper" },
+           "remotes" : {
+              "vendor,spf13": { "r": "http://github.com/spf13/viper" },
+              "joe": { "read": "http://github.com/joe/viper" }
+           }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Vendor": "True",
@@ -167,18 +178,13 @@ var codebaseExpanded = []byte(` { "name" : "dvln",
          "Readers" : "anyone",
          "Committers" : "team1@co.com"
        },
-       "remotes" : {
-         "vendor": { "r": "http://github.com/spf13/viper" },
-         "joe": { "read": "http://github.com/joe/viper" }
-       },
        "status" : "active"
      },
      { "id" : "23",
        "name" : "dvln/lib/out",
        "desc" : "dvln project copy of spf13/viper package",
-       "vcs" : "git",
+       "license" : "Apache-2.0",
        "ws" : "src/dvln/lib/out",
-       "repo" : { "rw": "http://github.com/dvln/out" },
        "aliases" : {
          "dvln/lib/oldoutname": "src/dvln/lib/oldoutname"
        },
@@ -188,9 +194,12 @@ var codebaseExpanded = []byte(` { "name" : "dvln",
          "Readers" : "anyone",
          "Committers" : "team_dvln@dvln.org"
        },
-       "remotes" : {
-         "dhowlett" : { "rw": "http://github.com/dhowlett/out" }
-       },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+           "repo" : { "rw": "http://github.com/dvln/out" },
+           "remotes" : { "dhowlett": { "r": "http://github.com/dhowlett/out" } }
+       } ],
        "access" : {
          "read" : "open",
          "write": "http://dvln.org/api/v1/access?codebase={{.TopCodebase}}&pkg={{.Pkg}}&branch={{.Branch}}&devline={{.Devline}}&user={{.UserID}}&type=write"
@@ -200,20 +209,21 @@ var codebaseExpanded = []byte(` { "name" : "dvln",
      { "id" : "24",
        "name" : "dvln/web/hugo",
        "desc" : "a fast static website server",
-       "vcs" : "git",
        "class" : "codebase",
        "ws" : "src/dvln/web/hugo",
-       "repo" : { "rw": "http://github.com/dvln/hugo" },
        "aliases" : {
          "github.com/spf13/hugo": "src/github.com/spf13/hugo"
        },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+           "repo" : { "rw": "http://github.com/dvln/hugo" },
+           "remotes" : { "vendor,spf13": { "r": "http://github.com/spf13/hugo" } }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Owners": "spf13@spf13.com",
          "Readers" : "anyone"
-       },
-       "remotes" : {
-         "vendor,spf13": { "r": "http://github.com/spf13/hugo" }
        },
        "status" : "active"
      }
@@ -224,7 +234,9 @@ var codebaseExpanded = []byte(` { "name" : "dvln",
 // This example has a missing } in a "repo" field template
 var badCodebaseTemplateExample = []byte(` { "name" : "dvln",
    "desc" : "Multi-package and workspace management tool",
-   "contacts" : [ "Erik Brady <brady@dvln.org>" ],
+   "contacts" : {
+   	 "authors" : [ "Erik Brady <brady@dvln.org>" ]
+   },
    "attrs" : {
      "linkalias" : "True",
      "jobs" : "4",
@@ -232,7 +244,7 @@ var badCodebaseTemplateExample = []byte(` { "name" : "dvln",
      "key1" : "val2"
    },
    "pathing": {
-   	 "ws_pfx_dir" : "{{if .GoPkg}}src{{end}}"
+   	 "wkspc_pfx_dir" : "{{if .GoPkg}}src{{end}}"
    },
    "vars" : {
      "dvln": "http://github.com/dvln",
@@ -251,12 +263,19 @@ var badCodebaseTemplateExample = []byte(` { "name" : "dvln",
        "name" : "dvln/lib/3rd/viper",
        "desc" : "dvln project copy of spf13/viper package",
        "ws" : "src/dvln/lib/3rd/viper",
-       "vcs" : "git",
-       "repo" : { "rw": "{{.dvln}/viper" },
        "aliases" : {
          "dvln/lib/olddir/viper": "src/dvln/lib/olddir/viper",
          "dvln/reallyolddir/viper": "src/dvln/reallyolddir/viper"
        },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+       	   "repo" : { "rw": "{{.dvln}/viper" },
+           "remotes" : {
+              "vendor,spf13": { "r": "{{.spf13}}/viper" },
+              "joe": { "read": "{{.joe}}/viper" }
+           }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Vendor": "True",
@@ -264,29 +283,27 @@ var badCodebaseTemplateExample = []byte(` { "name" : "dvln",
          "Readers" : "anyone",
          "Committers" : "team1@co.com"
        },
-       "remotes" : {
-         "vendor": { "r": "{{.spf13}}/viper" },
-         "joe": { "read": "{{.joe}}/viper" }
-       },
        "status" : "active"
      },
      { "id" : "23",
        "name" : "dvln/lib/out",
        "desc" : "dvln project copy of spf13/viper package",
-       "vcs" : "git",
+       "license" : "Apache-2.0",
        "ws" : "src/dvln/lib/out",
-       "repo" : { "rw": "{{.dvln}}/out" },
        "aliases" : {
          "dvln/lib/oldoutname": "src/dvln/lib/oldoutname"
        },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+           "repo" : { "rw": "{{.dvln}}/out" },
+           "remotes" : { "dhowlett": { "r": "{{.dhowlett}}/out" } }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Owners": "dvln@dvln.org",
          "Readers" : "anyone",
          "Committers" : "team_dvln@dvln.org"
-       },
-       "remotes" : {
-         "dhowlett" : { "rw": "{{.dhowlett}}/out" }
        },
        "access" : {
          "read" : "open",
@@ -297,20 +314,21 @@ var badCodebaseTemplateExample = []byte(` { "name" : "dvln",
      { "id" : "24",
        "name" : "dvln/web/hugo",
        "desc" : "a fast static website server",
-       "vcs" : "git",
        "class" : "codebase",
        "ws" : "src/dvln/web/hugo",
-       "repo" : { "rw": "{{.dvln}}/hugo" },
        "aliases" : {
          "github.com/spf13/hugo": "src/github.com/spf13/hugo"
        },
+       "vcs" : [ {
+       	   "type" : "git",
+       	   "fmts" : [ "vcs", "src", "source" ],
+           "repo" : { "rw": "{{.dvln}}/hugo" },
+           "remotes" : { "vendor,spf13": { "r": "{{.spf13}}/hugo" } }
+       } ],
        "attrs" : {
          "GoPkg" : "True",
          "Owners": "spf13@spf13.com",
          "Readers" : "anyone"
-       },
-       "remotes" : {
-         "vendor,spf13": { "r": "{{.spf13}}/hugo" }
        },
        "status" : "active"
      }
@@ -354,6 +372,8 @@ func TestCodebaseFileRead(t *testing.T) {
 	if codebaseDefn.Name != "dvln" {
 		t.Fatal("The codebase should have the name \"dvln\" but does not")
 	}
+	//results := fmt.Sprintf("%# v\n", pretty.Formatter(codebaseDefn))
+	//fmt.Printf("Codebase contents:\n%v", results)
 }
 
 func TestCodebaseParse(t *testing.T) {
@@ -405,6 +425,8 @@ func TestCodebaseParse(t *testing.T) {
 	if len(codebaseDefn.Pkgs) < 3 {
 		t.Fatalf("Codebase sample should have had 3 or more packages... but does not")
 	}
+	results := fmt.Sprintf("%# v\n", pretty.Formatter(codebaseDefn))
+	fmt.Printf("Codebase contents:\n%v", results)
 }
 
 func TestBadCodebaseParse(t *testing.T) {

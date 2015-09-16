@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/url"
 	"text/template"
 
 	"github.com/dvln/mapstructure"
@@ -34,15 +35,44 @@ import (
 
 // Defn is the code base defintion file: what known pkgs are available to
 // this codebase at startup time and what, if any, detailed config/description
-// and other info do we have on this codebase and constituent packages.
+// and other info do we have on this codebase and constituent packages.  Quick
+// overview:
+//   Name: the codebase name (note: a "codebase" can be a tool, lib pkgs, ..)
+//   Desc: optional; a description of the codebase
+//   HomePage: optional; a URL to the "home" page for the codebase
+//   PkgRev: this is the revision of the pkg containing the *.codebase defn file
+//   Deps: optional; pkg dependency style, "monolithic" or "independent" (default)
+//   Contacts: optional; map containing list of aliases|URL's|whatever, can be
+//             used to identify 'authors' : [ "Erik Brady <brady@dvln.org>" ],
+//             or any other types of contacts (contacts can also be set on pkgs)
+//   Attrs: optional; these are key/val pairs that to control the codebase in
+//          various ways, eg: default # of jobs, turn on/off semver support,
+//          allow multiple versions of the same pkg in a wkspc, turn on symlinks
+//          for any defined repo aliases (for both builtin and use by hooks)
+//          -> items like keywords,image file for the codebase,
+//   Vars: optional; shortcut variables, reduce typing by defining commonly
+//         used repo URL prefixes (or whatever) and then use Go templates
+//         syntax in those fields that allow expansion (Repo, Remotes, Access)
+//   Pathing: optional; keys like "wkspc_pfx_dir" can indicate to always or to
+//            conditionally prepend paths to pkg's brought into the wkspc, so
+//            if all "GoPkg" pkg's ("GoPkg" set in pkg Attrs) should live under
+//            '<wkspcroot>/src/<pkgname>/' then one could define that here
+//   License: optional; SPDX license identifier (http://spdx.org/licenses/)
+//   Issues: optional; URL to codebase level issue tracking sys, Pkg level also
+//   Access: optional; to be fully specified, access control possibilities
+//   Pkgs: details about pkgs for the codebase (pkg definitions, NOT versions)
 type Defn struct {
-	Name     string                       `json:"name"`
-	Desc     string                       `json:"desc"`
-    Pkg      pkg.Revision
-	Contacts []string                     `json:"contacts.omitempty"`
+	Name     string  `json:"name"`
+	Desc     string  `json:"desc"`
+	HomePage url.URL `json:"home_page"`
+	PkgRev   pkg.Revision
+	Deps     string                       `json:"deps,omitempty"`
+	Contacts map[string][]string          `json:"contacts,omitempty"`
 	Attrs    map[string]string            `json:"attrs,omitempty"`
 	Vars     map[string]string            `json:"vars,omitempty"`
 	Pathing  map[string]string            `json:"pathing,omitempty"`
+	License  string                       `json:"license,omitempty"`
+	Issues   url.URL                      `json:"issues"`
 	Access   map[string]map[string]string `json:"access,omitempty"`
 	Pkgs     []pkg.Defn                   `json:"pkgs" mapstructure:",squash"`
 }
@@ -206,24 +236,26 @@ func (cb *Defn) expandVarUse() error {
 
 	// Deal with package settings that can use vars in templates here:
 	for _, pkg := range cb.Pkgs {
-		// first deal with any repo settings using vars
-		for access, repoURI := range pkg.Repo {
-			desc := fmt.Sprintf("  Pkg: %s\n  Tgt: %s", pkg.Name, access)
-			result, err := cb.applyVarsToField(desc, "repoURI", repoURI)
-			if err != nil {
-				return err
-			}
-			pkg.Repo[access] = result
-		}
-		// then deal with any remotes definitions set up using vars
-		for remName, remURLMap := range pkg.Remotes {
-			for access, repoURI := range remURLMap {
-				desc := fmt.Sprintf("  Pkg: %s\n  Remote: %s\nTgt: %s", pkg.Name, remName, access)
-				result, err := cb.applyVarsToField(desc, "remoteURI", repoURI)
+		for _, vcs := range pkg.VCS {
+			// first deal with any repo settings using vars
+			for access, repoURI := range vcs.Repo {
+				desc := fmt.Sprintf("  Pkg: %s\n  VCS: %s\n  Tgt: %s", pkg.Name, vcs.Type, access)
+				result, err := cb.applyVarsToField(desc, "repoURI", repoURI)
 				if err != nil {
 					return err
 				}
-				remURLMap[access] = result
+				vcs.Repo[access] = result
+			}
+			// then deal with any remotes definitions set up using vars
+			for remName, remURLMap := range vcs.Remotes {
+				for access, repoURI := range remURLMap {
+					desc := fmt.Sprintf("  Pkg: %s\n  VCS: %s\n  Remote: %s\nTgt: %s", pkg.Name, vcs.Type, remName, access)
+					result, err := cb.applyVarsToField(desc, "remoteURI", repoURI)
+					if err != nil {
+						return err
+					}
+					remURLMap[access] = result
+				}
 			}
 		}
 	}
@@ -238,6 +270,9 @@ func (cb *Defn) Read(r io.Reader) error {
 	decJSON := json.NewDecoder(r)
 	err := decJSON.Decode(&codebaseMap)
 	if err != nil {
+		if serr, ok := err.(*json.SyntaxError); ok {
+			return out.WrapErrf(err, 3001, "Failed to decode codebase JSON (Bad Char Offset: %v)", serr.Offset)
+		}
 		return out.WrapErr(err, "Failed to decode codebase JSON file", 3001)
 	}
 
